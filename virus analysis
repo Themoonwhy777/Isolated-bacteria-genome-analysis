@@ -36,3 +36,13 @@ EOT
     # 提交任务
     qsub -cwd -l vf=40g,num_proc=4 -P P18Z10200N0423 -binding linear:4 -q st_supermem.q $script_file
 done
+
+
+
+######################################################################################################
+
+# After predicting virus genomes, We should use CheckV to evaluate the genome quality.
+
+
+
+
