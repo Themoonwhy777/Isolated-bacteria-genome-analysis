@@ -1,1 +1,38 @@
+# In order to obtain phage sequences from single bacterial genomes for subsequent analysis, we first need to predict the phage genome.
+# There are three tools we can used for predicting phage genome.
 
+# geNomad (normal) \ VirSorter (catagory 1,2,4,5) \ DeepVirFinder (p < 0.05). Next I show the example of using geNomad.
+
+#####
+#!/bin/bash
+
+# 激活 genomad 环境
+source /hwfsxx1/ST_HN/P18Z10200N0423/wanghaoyu/miniconda/bin/activate
+conda activate genomad
+
+# 输入和输出目录
+input_dir="/hwfsxx1/ST_HN/P18Z10200N0423/wanghaoyu/01_ccgr/06_genomes/02_184_genomes"
+output_base_dir="/hwfsxx1/ST_HN/P18Z10200N0423/wanghaoyu/01_ccgr/03_genomad/02_184"
+
+# 遍历目录下的所有 .fasta 文件
+for input_fasta in "$input_dir"/*.fasta; do
+    # 获取文件名（不带路径和扩展名）
+    filename=$(basename -- "$input_fasta")
+    filename="${filename%.*}"
+    
+    # 创建输出目录
+    output_dir="$output_base_dir/$filename"
+    mkdir -p "$output_dir"
+    
+    # 创建单独的脚本文件
+    script_file="genomad_${filename}.sh"
+    cat <<EOT > $script_file
+#!/bin/bash
+source /hwfsxx1/ST_HN/P18Z10200N0423/wanghaoyu/miniconda/bin/activate
+conda activate genomad
+genomad end-to-end --cleanup "$input_fasta" "$output_dir" /hwfsxx1/ST_HN/P18Z10200N0423/wanghaoyu/database/genomad/genomad_db
+EOT
+
+    # 提交任务
+    qsub -cwd -l vf=40g,num_proc=4 -P P18Z10200N0423 -binding linear:4 -q st_supermem.q $script_file
+done
