@@ -41,7 +41,12 @@ done
 
 ######################################################################################################
 
-# After predicting virus genomes, We should use CheckV to evaluate the genome quality.
+# After predicting virus genomes, We should use CheckV to evaluate the genome quality. The phage genomes of medium and high quality and marked as complete were selected for subsequent studies.
+
+
+
+
+## Clustering and de-redundancy at the species level. Clustering at the species level was performed according to 95% ANI and 85% AF (CheckV comes with its own script). To prevent redundant sequences predicted by the different algorithms, we deduplicated the viral sequences based on 100% sequence similarity and 100% coverage of short sequences （drep）. 
 
 
 
