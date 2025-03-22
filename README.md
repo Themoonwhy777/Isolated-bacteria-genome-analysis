@@ -1,0 +1,1 @@
+This project is based on the large-scale isolation and cultivation of gut bacteria and the subsequent analysis of their short-read (DNQSEQ) and long-read (CycloneSEQ) sequencing, including data processing and visualization using R.
