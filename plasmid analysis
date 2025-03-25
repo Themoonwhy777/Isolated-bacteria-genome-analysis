@@ -1,1 +1,165 @@
 ###  
+
+
+
+
+### Plasmid function analysis 
+### First, Count the unique CDSs contributed by plasmids compared to the main circular
+
+#!/bin/bash
+
+# 定义表格文件、质粒目录、主环目录和 conda 环境
+table_file="plasmid_infro.txt"
+plasmid_dir="/data/work/01_uni/01_plasmid/01_genomes_987/prokka"
+main_circular_dir="/data/work/01_uni/06_main_circular_987/02_prokka"
+diamond_env="diamond"
+cdhit_env="cdhit"
+
+# 定义中间数据根目录
+intermediate_root_dir="/data/work/01_uni/06_main_circular_987/intermediate_data"
+mkdir -p "$intermediate_root_dir"
+
+# 激活 diamond conda 环境
+source ~/miniconda3/bin/activate
+conda activate $diamond_env
+
+# 输出第一个表格表头
+echo -e "Plasmid\tGenome\tUnique_Non_Redundant_CDS_Count\tGenome_Non_Redundant_CDS_Count\tSpecies" > result_table.txt
+
+# 用于存储每个基因组的所有独特 CDS 文件
+declare -A genome_unique_cds_files
+# 用于存储每个基因组的主环非冗余 CDS 数量
+declare -A genome_main_non_redundant_counts
+
+# 读取表格文件
+while IFS=$'\t' read -r plasmid genome species; do
+    # 跳过表头
+    if [[ $plasmid == "New_File_Name" ]]; then
+        continue
+    fi
+
+    plasmid_faa="$plasmid_dir/$plasmid/${plasmid}.fa.faa"
+    main_faa="$main_circular_dir/$genome/${genome}.fa.faa"
+
+    if [[ -f $plasmid_faa && -f $main_faa ]]; then
+        # 创建主环去冗余数据目录
+        main_cdhit_dir="$intermediate_root_dir/${genome}_main_cdhit"
+        mkdir -p "$main_cdhit_dir"
+        # 主环 CDS 去冗余，激活 cdhit 环境
+        main_non_redundant_faa="$main_cdhit_dir/${genome}_non_redundant.fa.faa"
+        conda activate $cdhit_env
+        cd-hit -i $main_faa -o $main_non_redundant_faa -c 1.0 -s 1.0
+        if [ $? -ne 0 ]; then
+            echo "cd-hit failed for $genome"
+            continue
+        fi
+        conda activate $diamond_env
+
+        # 创建 diamond 数据库目录
+        diamond_db_dir="$intermediate_root_dir/${genome}_diamond_db"
+        mkdir -p "$diamond_db_dir"
+        # 为去冗余后的 main_faa 创建 diamond 数据库
+        db_name="$diamond_db_dir/${genome}_non_redundant_db"
+        diamond makedb --in $main_non_redundant_faa -d $db_name
+
+        # 创建比对结果目录
+        blast_result_dir="$intermediate_root_dir/${plasmid}_vs_${genome}_blast"
+        mkdir -p "$blast_result_dir"
+        # 使用 diamond 进行比对
+        output_file="$blast_result_dir/${plasmid}_vs_${genome}_non_redundant.m8"
+        diamond blastp -q $plasmid_faa -d $db_name -o $output_file -f 6 qseqid sseqid pident length qlen slen qstart qend sstart send evalue bitscore
+
+        # 创建独特 CDS 序列目录
+        unique_cds_dir="$intermediate_root_dir/${plasmid}_unique_cds"
+        mkdir -p "$unique_cds_dir"
+        # 找出质粒贡献的独特 CDS 序列
+        unique_cds_faa="$unique_cds_dir/${plasmid}_unique_cds.fa.faa"
+        awk '$3 < 100 || $4 != $6 || $4 != $7 {print $1}' $output_file | while read -r seq_id; do
+            grep -A1 "^>$seq_id" $plasmid_faa | sed '/^--$/d' >> $unique_cds_faa
+        done
+
+        # 创建独特 CDS 去冗余数据目录
+        unique_cdhit_dir="$intermediate_root_dir/${plasmid}_unique_cdhit"
+        mkdir -p "$unique_cdhit_dir"
+        # 独特 CDS 去冗余，激活 cdhit 环境
+        unique_non_redundant_faa="$unique_cdhit_dir/${plasmid}_unique_non_redundant.fa.faa"
+        conda activate $cdhit_env
+        cd-hit -i $unique_cds_faa -o $unique_non_redundant_faa -c 1.0 -s 1.0
+        if [ $? -ne 0 ]; then
+            echo "cd-hit failed for unique CDS of $plasmid"
+            continue
+        fi
+        conda activate $diamond_env
+
+        # 统计去冗余后基因组和独特 CDS 的数量
+        if [ -f "$main_non_redundant_faa" ]; then
+            genome_non_redundant_cds_count=$(grep -c "^>" $main_non_redundant_faa)
+        else
+            echo "File not found: $main_non_redundant_faa"
+            genome_non_redundant_cds_count=0
+        fi
+        unique_non_redundant_cds_count=$(grep -c "^>" $unique_non_redundant_faa)
+
+        # 输出结果到第一个表格
+        echo -e "$plasmid\t$genome\t$unique_non_redundant_cds_count\t$genome_non_redundant_cds_count\t$species" >> result_table.txt
+
+        echo "Successfully compared $plasmid and $genome, result saved in $output_file"
+
+        # 收集每个基因组的所有独特 CDS 文件
+        if [[ -z "${genome_unique_cds_files[$genome]}" ]]; then
+            genome_unique_cds_files[$genome]="$unique_non_redundant_faa"
+        else
+            genome_unique_cds_files[$genome]="${genome_unique_cds_files[$genome]} $unique_non_redundant_faa"
+        fi
+
+        # 存储每个基因组的主环非冗余 CDS 数量
+        genome_main_non_redundant_counts[$genome]=$genome_non_redundant_cds_count
+
+    else
+        echo "File not found: $plasmid_faa or $main_faa"
+    fi
+done < "$table_file"
+
+# 输出第二个表格表头
+echo -e "Genome\tAll_Plasmids_Unique_Non_Redundant_CDS_Count\tGenome_Non_Redundant_CDS_Count\tSpecies" > result_table_2.txt
+
+# 处理每个基因组的所有独特 CDS 文件
+for genome in "${!genome_unique_cds_files[@]}"; do
+    # 获取该基因组的物种信息
+    species=$(grep "$genome" "$table_file" | head -n 1 | cut -f 3)
+
+    # 创建合并独特 CDS 数据目录
+    merge_unique_cds_dir="$intermediate_root_dir/${genome}_merge_unique_cds"
+    mkdir -p "$merge_unique_cds_dir"
+    # 合并该基因组的所有独特 CDS 文件
+    all_unique_cds_faa="$merge_unique_cds_dir/${genome}_all_unique_cds.fa.faa"
+    cat ${genome_unique_cds_files[$genome]} > $all_unique_cds_faa
+
+    # 创建所有独特 CDS 去冗余数据目录
+    all_unique_cdhit_dir="$intermediate_root_dir/${genome}_all_unique_cdhit"
+    mkdir -p "$all_unique_cdhit_dir"
+    # 对合并后的文件进行去冗余，激活 cdhit 环境
+    all_unique_non_redundant_faa="$all_unique_cdhit_dir/${genome}_all_unique_non_redundant.fa.faa"
+    conda activate $cdhit_env
+    cd-hit -i $all_unique_cds_faa -o $all_unique_non_redundant_faa -c 1.0 -s 1.0
+    if [ $? -ne 0 ]; then
+        echo "cd-hit failed for all unique CDS of $genome"
+        continue
+    fi
+    conda activate $diamond_env
+
+    # 统计该基因组的所有质粒贡献的独特 CDS 数量
+    all_unique_non_redundant_cds_count=$(grep -c "^>" $all_unique_non_redundant_faa)
+
+    # 直接使用表一中对应基因组的非冗余 CDS 数量
+    genome_non_redundant_cds_count=${genome_main_non_redundant_counts[$genome]}
+
+    # 输出结果到第二个表格
+    echo -e "$genome\t$all_unique_non_redundant_cds_count\t$genome_non_redundant_cds_count\t$species" >> result_table_2.txt
+
+done
+
+
+
+
+####
