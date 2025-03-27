@@ -162,4 +162,69 @@ done
 
 
 
-####
+#### 质粒独特CDS的功能注释
+
+#!/bin/bash
+
+# 定义 eggnog conda 环境
+eggnog_env="eggnog"
+
+# 定义中间数据根目录，需和第一个脚本保持一致
+intermediate_root_dir="/data/work/01_uni/06_main_circular_987/intermediate_data"
+
+# 定义结果文件保存目录
+result_dir="/data/work/01_uni/01_plasmid/unique_eggnog"
+mkdir -p "$result_dir"
+
+# 激活 eggnog conda 环境
+source ~/miniconda3/bin/activate
+conda activate $eggnog_env
+
+# 临时合并文件
+merged_file="$result_dir/merged_unique_cds.fa.faa"
+# 记录来源的文件
+source_record="$result_dir/source_record.txt"
+> "$merged_file"
+> "$source_record"
+
+# 遍历每个基因组的所有独特 CDS 去冗余文件
+for genome in $(ls -d $intermediate_root_dir/*_all_unique_cdhit); do
+    genome_name=$(basename $genome | sed 's/_all_unique_cdhit//')
+    input_file="$genome/${genome_name}_all_unique_non_redundant.fa.faa"
+
+    if [ -f "$input_file" ]; then
+        while IFS= read -r line; do
+            if [[ $line =~ ^\> ]]; then
+                new_id="${genome_name}_${line#>}"
+                echo ">$new_id" >> "$merged_file"
+                echo "$new_id $genome_name" >> "$source_record"
+            else
+                echo "$line" >> "$merged_file"
+            fi
+        done < "$input_file"
+    else
+        echo "File not found: $input_file"
+    fi
+done
+
+# 运行 eggnog 注释
+merged_output_file="$result_dir/merged_eggnog_annotation.emapper.annotations"
+emapper.py -i "$merged_file" \
+           --output "$merged_output_file" \
+           -m diamond \
+           --cpu 16 \
+           -d bact \
+           --data_dir /data/work/eggnog_database/eggnog_5.0
+
+# 根据记录拆分结果到各个基因组子目录
+while IFS= read -r line; do
+    seq_id=$(echo "$line" | cut -d' ' -f1)
+    genome_name=$(echo "$line" | cut -d' ' -f2)
+    genome_result_dir="$result_dir/$genome_name"
+    mkdir -p "$genome_result_dir"
+    output_file="$genome_result_dir/${genome_name}_eggnog_annotation.emapper.annotations"
+    grep "^$seq_id" "$merged_output_file" >> "$output_file"
+done < "$source_record"
+
+echo "All genomes have been annotated with eggnog, results saved in respective subdirectories."
+    
